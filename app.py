@@ -182,10 +182,8 @@ if 'filtered_news' in st.session_state and st.session_state.filtered_news:
                 st.subheader(f"🔸 {kw}")
                 for i, article in enumerate(items):
                     title = article.get('title', "無標題")
-                    url = article.get('url', "#")
+                    url = article.get('link', "#")
                     key = f"select_{kw}_{i}"
-
-                    # 【核心修改】檢查標題是否在 AI 推薦列表中
                     is_recommended = title in recommended_titles
                     
                     col1, col2 = st.columns([0.8, 0.2])
@@ -237,8 +235,8 @@ if 'filtered_news' in st.session_state and st.session_state.filtered_news:
                         for item in grouped_news[category]:
                             result_msg += f"{item['title']}\n{item['link']}\n\n"
 
-                st.success("✅ 已產生報表")
-                st.text_area("📋 LINE 報表內容 (可複製)", result_msg.strip(), height=400)
+                st.success("✅ 已產生訊息，請複製內容到LINE群組")
+                st.text_area("📋 LINE 訊息內容 (可複製)", result_msg.strip(), height=400)
                 js_safe_msg = result_msg.strip().replace('`','\\`').replace('\\','\\\\').replace('$', '\\$')
                 components.html(f"""
                     <button onclick="copyText()" style="font-size:16px;padding:8px 16px;margin-top:10px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer;">
