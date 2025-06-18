@@ -2,11 +2,15 @@ import streamlit as st
 import collections
 from serpapi import GoogleSearch
 import streamlit.components.v1 as components
-import requests # 新增，用於查詢帳戶資訊
-
+import requests 
+import google.generativeai as genai
 # --- Setup: API Key & Core Functions ---
 
 SERPAPI_API_KEY = st.secrets.get("SERPAPI_API_KEY")
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_data(ttl=60) # 使用快取，每 1 分鐘(60秒)才重新抓取一次
 def get_serpapi_account_info(api_key):
@@ -21,7 +25,7 @@ def get_serpapi_account_info(api_key):
         return None
 
 def is_published_very_recently(date_str: str) -> bool:
-    """採用您的最終版邏輯：只接受時間單位為秒、分鐘、小時的新聞。"""
+    """只接受時間單位為秒、分鐘、小時的新聞。"""
     if not isinstance(date_str, str):
         return False
     date_str_lower = date_str.lower()
@@ -52,6 +56,35 @@ def fetch_news_from_light_api(keywords: list):
             st.error(f"搜尋關鍵字 '{kw}' 時發生錯誤: {e}")
     return raw_results
 
+@st.cache_data(ttl=600) # 將 AI 的推薦結果快取 10 分鐘
+def get_ai_recommendations(_articles_dict, prompt_template):
+    if not GEMINI_API_KEY or not genai.get_model('models/gemini-1.5-flash'):
+        return []
+
+    # 將所有新聞標題整理成一個列表
+    all_titles = []
+    for kw, items in _articles_dict.items():
+        for item in items:
+            all_titles.append(item['title'])
+    
+    if not all_titles:
+        return []
+
+    # 組合最終的 Prompt
+    full_prompt = prompt_template + "\n\n以下是新聞標題列表：\n" + "\n".join(f"- {title}" for title in all_titles)
+    full_prompt += "\n\n請只回傳你挑選出的新聞標題，每個標題一行，不要有其他多餘的文字或編號。"
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(full_prompt)
+        # 將 AI 回傳的文字，按換行符切分成標題列表
+        recommended_titles = response.text.strip().split('\n')
+        # 清理可能出現的 "- " 等符號
+        cleaned_titles = [title.strip().lstrip('- ') for title in recommended_titles]
+        return cleaned_titles
+    except Exception as e:
+        st.error(f"請求 AI 推薦時發生錯誤: {e}")
+        return []
 # --- Streamlit UI ---
 
 st.set_page_config(page_title="捷運輿情工具", page_icon="🚇", layout="wide")
@@ -69,13 +102,15 @@ with st.expander("📖 使用說明"):
     st.markdown("""
     1.  **輸入關鍵字**：用逗號分隔。
     2.  **抓取與篩選**：點擊按鈕後，程式會抓取最多 100 則新聞，並篩選出24小時內的新聞。
-    3.  **勾選與分類**：從篩選後的結果中挑選您需要的文章。
-    4.  **產生報表**：產生最終的 LINE 格式訊息。
+    3.  **(可選) 請求 AI 推薦**：點擊「請求 AI 推薦」按鈕，AI 會根據內建的指令，為您預先勾選它認為重要的項目。
+    4.  **最終確認與分類**：檢查 AI 預選的結果，您可以取消勾選或補上其他新聞，並為所有勾選項目指定分類。
+    5.  **產生報表**：點擊「產生 Line 訊息」按鈕，即可獲得最終的輿情報告。
     """)
 
 if 'filtered_news' not in st.session_state:
     st.session_state.filtered_news = collections.defaultdict(list)
 
+st.header("Step 1:輸入關鍵字")
 default_keywords = "捷運, 輕軌, 環狀線, 新北, 軌道, 鐵路"
 keywords_input = st.text_input("🔍 輸入關鍵字（逗號分隔）", default_keywords)
 
@@ -102,13 +137,43 @@ if st.button("📥 抓取並篩選近期新聞"):
         total_found = sum(len(v) for v in filtered_results.values())
         st.success(f"✅ 篩選完成！總共找到了 {total_found} 則近期新聞。")
 
+
+# --- AI 推薦區塊 (無輸入框版) ---
+if 'filtered_news' in st.session_state and st.session_state.filtered_news:
+    st.header("Step 2: (可選) 請求 AI 推薦")
+
+    # 直接點擊按鈕，使用內建的固定指令
+    if st.button("🤖 請求 AI 推薦"):
+        if not GEMINI_API_KEY:
+            st.error("請先在 .streamlit/secrets.toml 中設定您的 GEMINI_API_KEY。")
+        else:
+            # 【核心修改】將 Prompt 直接寫在程式碼中
+            # 您可以隨時在這裡修改您的固定指令
+            hardcoded_prompt = """
+            你是一位新北捷運局的輿情觀測員，你的任務是從每日新聞中，挑選出與業務最相關、或可能需要高層注意的事件。
+            請從以下新聞標題列表中，挑選出 3-5 則與「新北市」、「捷運工程」、「列車狀況」、「民眾抱怨」或「重大意外」最相關的新聞。
+            """
+            
+            with st.spinner("🧠 AI 正在為您閱讀與挑選新聞..."):
+                # 將固定的指令傳送給 AI 函數
+                recommended_titles = get_ai_recommendations(st.session_state.filtered_news, hardcoded_prompt)
+                
+                # 將 AI 推薦的結果存到 session_state 中
+                st.session_state.recommended_titles = recommended_titles
+                st.success(f"AI 已推薦 {len(recommended_titles)} 則新聞，請至下方查看預勾選結果。")
+
 # --- 勾選與分類表單 ---
-if st.session_state.filtered_news:
-    st.header("Step 2: 勾選並分類您需要的新聞")
+if 'filtered_news' in st.session_state and st.session_state.filtered_news:
+    st.header("Step 3: 勾選並分類您需要的新聞")
+    
+    # 從 session_state 中讀取 AI 的推薦結果 (如果沒有推薦，則為空列表)
+    recommended_titles = st.session_state.get('recommended_titles', [])
+
     with st.form("news_selection_form"):
         selected_articles_data = []
         categories = ["【新北】", "【同業】", "【其他】"]
         
+        # 使用者輸入的關鍵字列表來維持順序
         keyword_list_in_scope = [k.strip() for k in keywords_input.split(",") if k.strip()]
 
         for kw in keyword_list_in_scope:
@@ -117,20 +182,40 @@ if st.session_state.filtered_news:
                 st.subheader(f"🔸 {kw}")
                 for i, article in enumerate(items):
                     title = article.get('title', "無標題")
-                    url = article.get('link', "#")
+                    url = article.get('url', "#")
                     key = f"select_{kw}_{i}"
 
+                    # 【核心修改】檢查標題是否在 AI 推薦列表中
+                    is_recommended = title in recommended_titles
+                    
                     col1, col2 = st.columns([0.8, 0.2])
                     with col1:
-                        is_selected = st.checkbox(f"[{title}]({url})", key=key, help=f"來源：{article.get('source', '未知')} - 發布於: {article.get('date', '未知')}")
+                        # 使用 value=is_recommended 來決定是否預設勾選
+                        is_selected = st.checkbox(
+                            f"[{title}]({url})", 
+                            key=key, 
+                            value=is_recommended, 
+                            help=f"來源：{article.get('source', '未知')} - 發布於: {article.get('date', '未知')}"
+                        )
                     with col2:
-                        category = st.radio("分類", options=categories, key=f"cat_{kw}_{i}", horizontal=True, label_visibility="collapsed")
+                        category = st.radio(
+                            "分類", 
+                            options=categories, 
+                            key=f"cat_{kw}_{i}", 
+                            horizontal=True, 
+                            label_visibility="collapsed"
+                        )
                     
                     if is_selected:
                         article['category'] = category
                         selected_articles_data.append(article)
         
         submitted = st.form_submit_button("✅ 產生 Line 訊息")
+        
+        if submitted:
+            # 將最終勾選的結果存到 session_state，以便在表單外產生報表
+            st.session_state.form_submitted = True
+            st.session_state.selected_news_for_report = selected_articles_data
 
         # --- 報表產生 ---
         if submitted:
