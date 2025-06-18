@@ -86,11 +86,11 @@ if st.button("📥 抓取並篩選近期新聞"):
     elif not SERPAPI_API_KEY:
         st.error("請先在 .streamlit/secrets.toml 中設定您的 SERPAPI_API_KEY。")
     else:
-        with st.spinner("🔄 正在抓取大量最新新聞..."):
+        with st.spinner("🔄 正在抓取最新新聞..."):
             all_news_results = fetch_news_from_light_api(keyword_list)
         
         filtered_results = collections.defaultdict(list)
-        with st.spinner("🔍 正在進行精準時間篩選..."):
+        with st.spinner("🔍 正在進行時間篩選..."):
             for kw, items in all_news_results.items():
                 for item in items:
                     if is_published_very_recently(item.get("date")):
@@ -100,7 +100,7 @@ if st.button("📥 抓取並篩選近期新聞"):
         st.session_state.filtered_news = filtered_results
         
         total_found = sum(len(v) for v in filtered_results.values())
-        st.success(f"✅ 篩選完成！總共找到了 {total_found} 則近期新聞 (發布於幾小時或幾分鐘前)。")
+        st.success(f"✅ 篩選完成！總共找到了 {total_found} 則近期新聞。")
 
 # --- 勾選與分類表單 ---
 if st.session_state.filtered_news:
