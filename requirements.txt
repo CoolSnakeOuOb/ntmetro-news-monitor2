@@ -1,0 +1,2 @@
+google_search_results==2.4.2
+streamlit==1.45.1
