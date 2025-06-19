@@ -189,15 +189,6 @@ with main_col:
                 </script>
                 <style> button {{ font-size:16px; padding:8px 16px; margin-top:10px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; background-color: #f0f2f6;}} button:hover {{ background-color: #e0e2e6; }}</style>
             """, height=80)
-        
-        b_left, b_mid, b_right = st.columns([2, 1, 2])
-        with b_mid:
-            # 這個按鈕也可以不用全寬
-            if st.button("清除報告並重新開始"):
-                if 'report_data' in st.session_state: del st.session_state.report_data
-                if 'filtered_news' in st.session_state: del st.session_state.filtered_news
-                if 'recommended_titles' in st.session_state: del st.session_state.recommended_titles
-                st.rerun()
 
 # --- 4. 按鈕的後端處理邏輯 (放在 UI 渲染程式碼之外) ---
 if fetch_button_pressed:
