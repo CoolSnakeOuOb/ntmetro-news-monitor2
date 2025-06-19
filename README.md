@@ -4,7 +4,7 @@
 
 本工具旨在快速抓取與指定關鍵字相關的即時新聞，透過 AI 進行初步篩選推薦，並由人工進行最終確認與分類，最後一鍵產生適用於通訊軟體（如 LINE）的輿情報告。
 
-![應用程式截圖](https://i.imgur.com/your-screenshot-url.png)
+![應用程式截圖](https://github.com/user-attachments/assets/855b9dbb-e72b-466b-bcac-88600fa67acd)
 
 ---
 
