@@ -195,10 +195,13 @@ with main_col:
                         title, url, source, date = article.get('title', "無標題"), article.get('link', "#"), article.get('source', '未知來源'), article.get('date', '未知時間')
                         key_prefix = f"item_{kw}_{i}"
                         is_recommended = title in recommended_titles
-                        with st.container(border=True):
-                            c1, c2, c3 = st.columns([0.08, 0.62, 0.3])
+                            with st.container(border=True):
+                                c1, c2, c3 = st.columns([0.08, 0.62, 0.3])
+                                checkbox_key = f"{key_prefix}_select"
+                                if checkbox_key not in st.session_state:
+                                    st.session_state[checkbox_key] = is_recommended
                             with c1:
-                                is_selected = st.checkbox("", key=f"{key_prefix}_select", value=is_recommended, label_visibility="collapsed")
+                                is_selected = st.checkbox("", key=checkbox_key, label_visibility="collapsed")
                             with c2:
                                 st.markdown(f"**{title}**")
                                 st.caption(f"🔗 [{source}]({url}) | 🕒 {date}")
@@ -251,6 +254,7 @@ with main_col:
         
 
         
+
 
 
 
