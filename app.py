@@ -74,7 +74,7 @@ def get_ai_recommendations(_articles_dict, prompt_template):
     if not all_titles: return []
     full_prompt = (f"{prompt_template}\n\n以下是新聞標題列表：\n" + "\n".join(f"- {title}" for title in all_titles) + "\n\n請只回傳你挑選出的新聞標題，每個標題一行，不要有其他多餘的文字或編號。")
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-3-pro-preview'),
         response = model.generate_content(full_prompt)
         cleaned_titles = [title.strip().lstrip('- ') for title in response.text.strip().split('\n')]
         return cleaned_titles
@@ -235,3 +235,4 @@ with main_col:
         
 
         
+
