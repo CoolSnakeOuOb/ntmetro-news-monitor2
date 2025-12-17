@@ -162,6 +162,22 @@ with main_col:
                 with st.spinner("🧠 AI 正在為您閱讀與挑選新聞..."):
                     recommended = get_ai_recommendations(st.session_state.filtered_news, cleaned_prompt)
                     st.session_state.recommended_titles = recommended
+                    
+                    # === 🔴 新增這段：強制更新 Checkbox 的狀態 ===
+                    # 必須遍歷所有新聞，找出被 AI 點名到的，手動把它的 Session State 改為 True
+                    for kw, items in st.session_state.filtered_news.items():
+                        for i, article in enumerate(items):
+                            # 這裡的 Key 規則必須跟 Step 3 產生 Checkbox 時的一模一樣
+                            key_name = f"item_{kw}_{i}_select"
+                            
+                            # 檢查標題是否完全符合
+                            if article.get('title') in recommended:
+                                st.session_state[key_name] = True
+                            else:
+                                # 如果沒被推薦，也可以選擇強制取消勾選 (看您需求，非必要)
+                                st.session_state[key_name] = False
+                    # ==========================================
+
                     st.toast(f"AI 已推薦 {len(recommended)} 則新聞！", icon="💡")
         
         st.divider()
@@ -235,5 +251,6 @@ with main_col:
         
 
         
+
 
 
