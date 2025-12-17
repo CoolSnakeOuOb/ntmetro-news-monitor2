@@ -1,6 +1,6 @@
 import streamlit as st
 import collections
-import textwrap  # <--- 已加入
+import textwrap
 from serpapi import GoogleSearch
 import streamlit.components.v1 as components
 import requests
@@ -62,7 +62,7 @@ def shorten_url(long_url: str):
         else:
             return long_url
     except requests.RequestException as e:
-        st.warning(f"縮網址失敗 ({e})。將使用原始網址：{long_url}")
+        # st.warning(f"縮網址失敗 ({e})。將使用原始網址：{long_url}")
         return long_url
 
 @st.cache_data(ttl=600)
@@ -74,7 +74,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
     if not all_titles: return []
     full_prompt = (f"{prompt_template}\n\n以下是新聞標題列表：\n" + "\n".join(f"- {title}" for title in all_titles) + "\n\n請只回傳你挑選出的新聞標題，每個標題一行，不要有其他多餘的文字或編號。")
     try:
-        model = genai.GenerativeModel('gemini-3-pro-preview')
+        # ✅ 修改點 1：使用您截圖確認可用的模型版本 (移除末尾逗號)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
         response = model.generate_content(full_prompt)
         cleaned_titles = [title.strip().lstrip('- ') for title in response.text.strip().split('\n')]
         return cleaned_titles
@@ -87,7 +88,6 @@ left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
     st.title("🚇 新北捷運輿情監測")
-
     st.info("📢 **功能更新**：報告中的新聞連結現在會自動縮短，讓版面更簡潔、更易於分享！", icon="✨")
 
     if not SERPAPI_KEYS_TABLE:
@@ -163,20 +163,14 @@ with main_col:
                     recommended = get_ai_recommendations(st.session_state.filtered_news, cleaned_prompt)
                     st.session_state.recommended_titles = recommended
                     
-                    # === 🔴 新增這段：強制更新 Checkbox 的狀態 ===
-                    # 必須遍歷所有新聞，找出被 AI 點名到的，手動把它的 Session State 改為 True
+                    # ✅ 修改點 2：強制更新 Session State，確保介面會勾選
                     for kw, items in st.session_state.filtered_news.items():
                         for i, article in enumerate(items):
-                            # 這裡的 Key 規則必須跟 Step 3 產生 Checkbox 時的一模一樣
                             key_name = f"item_{kw}_{i}_select"
-                            
-                            # 檢查標題是否完全符合
                             if article.get('title') in recommended:
                                 st.session_state[key_name] = True
-                            else:
-                                # 如果沒被推薦，也可以選擇強制取消勾選 (看您需求，非必要)
-                                st.session_state[key_name] = False
-                    # ==========================================
+                            # else: 
+                            #     st.session_state[key_name] = False # 若需要強制取消未推薦的，可打開此行
 
                     st.toast(f"AI 已推薦 {len(recommended)} 則新聞！", icon="💡")
         
@@ -187,6 +181,7 @@ with main_col:
             selected_articles_data = []
             recommended_titles = st.session_state.get('recommended_titles', [])
             keyword_list_in_scope = [k.strip() for k in keywords_input.split(",") if k.strip()]
+            
             for kw in keyword_list_in_scope:
                 items = st.session_state.filtered_news.get(kw, [])
                 if items:
@@ -194,19 +189,25 @@ with main_col:
                     for i, article in enumerate(items):
                         title, url, source, date = article.get('title', "無標題"), article.get('link', "#"), article.get('source', '未知來源'), article.get('date', '未知時間')
                         key_prefix = f"item_{kw}_{i}"
+                        checkbox_key = f"{key_prefix}_select"
                         is_recommended = title in recommended_titles
-                            with st.container(border=True):
-                                c1, c2, c3 = st.columns([0.08, 0.62, 0.3])
-                                checkbox_key = f"{key_prefix}_select"
-                                if checkbox_key not in st.session_state:
-                                    st.session_state[checkbox_key] = is_recommended
+                        
+                        # ✅ 修改點 3：解決 Widget 衝突報錯
+                        # 如果 Session State 裡還沒有這個 key，才把預設值寫進去
+                        if checkbox_key not in st.session_state:
+                            st.session_state[checkbox_key] = is_recommended
+
+                        with st.container(border=True):
+                            c1, c2, c3 = st.columns([0.08, 0.62, 0.3])
                             with c1:
+                                # 注意：這裡移除了 value=... 參數，完全依賴 key 和 session_state
                                 is_selected = st.checkbox("", key=checkbox_key, label_visibility="collapsed")
                             with c2:
                                 st.markdown(f"**{title}**")
                                 st.caption(f"🔗 [{source}]({url}) | 🕒 {date}")
                             with c3:
                                 category = st.radio("分類", options=CATEGORIES, key=f"{key_prefix}_cat", horizontal=True, label_visibility="collapsed")
+                        
                         if is_selected:
                             article['category'] = category
                             selected_articles_data.append(article)
@@ -227,6 +228,7 @@ with main_col:
             grouped_news = collections.defaultdict(list)
             for item in report_articles:
                 grouped_news[item.get('category', "【其他】")].append(item)
+            
             result_msg = "各位長官、同仁早安，\n今日新聞輿情連結如下：\n\n"
             for category in CATEGORIES:
                 if category in grouped_news:
@@ -254,6 +256,7 @@ with main_col:
         
 
         
+
 
 
 
