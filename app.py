@@ -5,8 +5,8 @@ from serpapi import GoogleSearch
 import streamlit.components.v1 as components
 import requests
 import google.generativeai as genai
-from datetime import datetime, timedelta
-import pytz # 用於處理時區
+from datetime import datetime
+import pytz
 
 # --- 1. 常數設定與金鑰讀取 ---
 st.set_page_config(page_title="捷運輿情監測", page_icon="🚇", layout="wide")
@@ -40,42 +40,52 @@ def get_serpapi_account_info(api_key):
     except requests.RequestException:
         return None
 
-def is_fresh_news(date_str):
+def is_strictly_24h(date_str):
     """
-    聰明的日期過濾器：
-    1. 保留相對時間 (ago, hour, min)
-    2. 保留日期是「今天」或「昨天」的新聞
-    3. 踢除更早以前的
+    🔥 極限嚴格 24 小時過濾器 🔥
+    原則：寧可錯殺，不可放過舊聞。
     """
-    if not date_str: return True # 沒有日期的通常是廣告或置頂，先保留或視情況過濾
+    if not date_str: 
+        return False # 沒有日期標記的可能是廣告或舊聞，嚴格模式下剔除
     
-    # 1. 檢查相對時間關鍵字 (最優先保留)
-    relative_keywords = ["ago", "hour", "min", "sec", "前", "小時", "分", "秒", "Just now"]
-    if any(k in date_str.lower() for k in relative_keywords):
+    s = date_str.lower()
+    
+    # 1. 直接剔除明確表示超過 1 天的關鍵字
+    # "1 day ago", "2 days ago", "week", "month" -> 全部殺掉
+    block_keywords = ["day", "week", "month", "year", "天", "週", "月", "年"]
+    if any(k in s for k in block_keywords):
+        return False
+
+    # 2. 接受明確的小時/分鐘級別 (這絕對在 24 小時內)
+    # "hours ago", "mins ago", "just now"
+    allow_keywords = ["hour", "min", "sec", "just now", "小時", "分", "秒", "時"]
+    if any(k in s for k in allow_keywords):
         return True
 
-    # 2. 檢查絕對日期 (處理如 12/22/2025)
+    # 3. 處理絕對日期 (例如 "12/23/2025")
+    # 規則：只接受「今天」的日期，昨天(12/22)一律剔除
     try:
-        # 取得台灣現在時間
         tw_tz = pytz.timezone('Asia/Taipei')
         now = datetime.now(tw_tz)
-        today_str = now.strftime("%m/%d")      # 例如 12/23
-        yesterday_str = (now - timedelta(days=1)).strftime("%m/%d") # 例如 12/22
         
-        # Google News 標準版回傳格式通常包含 "MM/DD/YYYY"
-        # 我們簡單檢查字串裡有沒有包含「今天」或「昨天」的日期
-        if today_str in date_str or yesterday_str in date_str:
-            return True
-            
-        # 額外檢查：有時候是 "Dec 23" 這種格式
-        today_str_b = now.strftime("%b %d") # Dec 23
-        yesterday_str_b = (now - timedelta(days=1)).strftime("%b %d") # Dec 22
-        if today_str_b in date_str or yesterday_str_b in date_str:
-            return True
+        # 取得今天的日期字串組合 (Cover 不同格式)
+        today_formats = [
+            now.strftime("%m/%d"),      # 12/23
+            now.strftime("%Y/%m/%d"),   # 2025/12/23
+            now.strftime("%b %d"),      # Dec 23
+        ]
+        
+        # 檢查日期字串中是否包含「今天」
+        # 注意：我們不檢查昨天，因為昨天的日期可能包含 "昨天早上"，那已經超過 24 小時了
+        for fmt in today_formats:
+            if fmt in date_str:
+                return True
+        
+        # 如果是日期格式，但不是今天 -> 視為舊聞 (例如 12/22, 12/17)
+        return False
 
-        return False # 如果有日期顯示，但既不是相對時間，也不是今昨兩天，那就過濾掉
     except:
-        return True # 解析失敗的話，為了不誤殺，選擇保留
+        return False # 解析失敗，嚴格模式下剔除
 
 def fetch_news_from_api(api_key, keywords: list):
     raw_results = collections.defaultdict(list)
@@ -87,7 +97,7 @@ def fetch_news_from_api(api_key, keywords: list):
             "hl": "zh-tw", 
             "gl": "tw", 
             "num": 100, 
-            "tbs": "qdr:d" 
+            "tbs": "qdr:d"  # API 層面的 24H 限制
         }
         try:
             search = GoogleSearch(params)
@@ -98,8 +108,8 @@ def fetch_news_from_api(api_key, keywords: list):
                     link = item.get("link")
                     date_str = item.get("date", "")
                     
-                    # ✅ 雙重過濾：既要有標題連結，也要通過日期新鮮度檢查
-                    if title and link and is_fresh_news(date_str):
+                    # ✅ 嚴格檢查：日期必須通過 strict_24h 驗證
+                    if title and link and is_strictly_24h(date_str):
                         raw_results[kw].append(item)
         except Exception as e:
             st.error(f"搜尋關鍵字 '{kw}' 時發生錯誤: {e}")
@@ -140,8 +150,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測 (智能過濾版)")
-    st.info("📢 **系統更新**：已啟用智能日期過濾，精準鎖定 24-48 小時內新聞，並修復來源顯示問題。", icon="✨")
+    st.title("🚇 新北捷運輿情監測 (極限 24H 版)")
+    st.info("📢 **系統更新**：已啟用極限過濾模式，嚴格剔除所有「昨天」或更早的新聞。", icon="⏱️")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -161,7 +171,7 @@ with main_col:
     
     with st.expander("📖 使用說明"):
         st.markdown("""
-        1.  **抓取新聞**：抓取標準版 Google News，並自動過濾舊聞。
+        1.  **抓取新聞**：僅保留「小時/分鐘前」或「今日」發布的新聞。
         2.  **AI 推薦**：AI 自動分析並勾選重要新聞。
         3.  **確認與匯出**：確認內容後產生 LINE 訊息。
         """)
@@ -179,7 +189,7 @@ with main_col:
         del st.session_state.fetch_success_message
 
     if fetch_button_pressed:
-        with st.spinner("正在抓取並進行智能過濾..."):
+        with st.spinner("正在抓取並進行 24H 極限過濾..."):
             keyword_list = [k.strip() for k in keywords_input.split(",") if k.strip()]
             if not keyword_list:
                 st.warning("請輸入有效的關鍵字。")
@@ -187,7 +197,7 @@ with main_col:
                 all_news = fetch_news_from_api(SERPAPI_API_KEY, keyword_list)
                 st.session_state.filtered_news = all_news
                 total_found = sum(len(v) for v in all_news.values())
-                st.session_state.fetch_success_message = f"✅ 抓取完成！經智能過濾後共保留 {total_found} 則新聞。"
+                st.session_state.fetch_success_message = f"✅ 抓取完成！嚴格保留 {total_found} 則 24 小時內新聞。"
         st.rerun()
 
     if st.session_state.filtered_news:
@@ -231,7 +241,6 @@ with main_col:
                         url = article.get('link', "#")
                         date = article.get('date', '未知時間')
                         
-                        # ✅ 修正：解決未知來源問題
                         raw_source = article.get('source')
                         if isinstance(raw_source, dict):
                             source = raw_source.get('title') or raw_source.get('name') or "未知來源"
@@ -306,9 +315,9 @@ with main_col:
                     button:hover {{ background-color: #e0e2e6; }}
                 </style>
             """, height=80)
-        
 
         
+
 
 
 
