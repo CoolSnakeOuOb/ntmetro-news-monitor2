@@ -150,8 +150,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測 (極限 24H 版)")
-    st.info("📢 **系統更新**：已啟用極限過濾模式，嚴格剔除所有「昨天」或更早的新聞。", icon="⏱️")
+    st.title("🚇 新北捷運輿情監測")
+    st.info("📢 **系統更新**：", icon="⏱️")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -317,6 +317,7 @@ with main_col:
             """, height=80)
 
         
+
 
 
 
