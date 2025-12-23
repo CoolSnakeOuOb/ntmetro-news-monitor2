@@ -7,6 +7,7 @@ import requests
 import google.generativeai as genai
 from datetime import datetime
 import pytz
+import time
 
 # --- 1. 常數設定與金鑰讀取 ---
 st.set_page_config(page_title="捷運輿情監測", page_icon="🚇", layout="wide")
@@ -43,76 +44,82 @@ def get_serpapi_account_info(api_key):
 def is_strictly_24h(date_str):
     """
     🔥 極限嚴格 24 小時過濾器 🔥
-    原則：寧可錯殺，不可放過舊聞。
     """
-    if not date_str: 
-        return False # 沒有日期標記的可能是廣告或舊聞，嚴格模式下剔除
-    
+    if not date_str: return False
     s = date_str.lower()
-    
-    # 1. 直接剔除明確表示超過 1 天的關鍵字
-    # "1 day ago", "2 days ago", "week", "month" -> 全部殺掉
     block_keywords = ["day", "week", "month", "year", "天", "週", "月", "年"]
-    if any(k in s for k in block_keywords):
-        return False
-
-    # 2. 接受明確的小時/分鐘級別 (這絕對在 24 小時內)
-    # "hours ago", "mins ago", "just now"
+    if any(k in s for k in block_keywords): return False
     allow_keywords = ["hour", "min", "sec", "just now", "小時", "分", "秒", "時"]
-    if any(k in s for k in allow_keywords):
-        return True
-
-    # 3. 處理絕對日期 (例如 "12/23/2025")
-    # 規則：只接受「今天」的日期，昨天(12/22)一律剔除
+    if any(k in s for k in allow_keywords): return True
     try:
         tw_tz = pytz.timezone('Asia/Taipei')
         now = datetime.now(tw_tz)
-        
-        # 取得今天的日期字串組合 (Cover 不同格式)
-        today_formats = [
-            now.strftime("%m/%d"),      # 12/23
-            now.strftime("%Y/%m/%d"),   # 2025/12/23
-            now.strftime("%b %d"),      # Dec 23
-        ]
-        
-        # 檢查日期字串中是否包含「今天」
-        # 注意：我們不檢查昨天，因為昨天的日期可能包含 "昨天早上"，那已經超過 24 小時了
+        # 只允許今天的日期
+        today_formats = [now.strftime("%m/%d"), now.strftime("%Y/%m/%d"), now.strftime("%b %d")]
         for fmt in today_formats:
-            if fmt in date_str:
-                return True
-        
-        # 如果是日期格式，但不是今天 -> 視為舊聞 (例如 12/22, 12/17)
+            if fmt in date_str: return True
+        return False
+    except:
         return False
 
-    except:
-        return False # 解析失敗，嚴格模式下剔除
-
 def fetch_news_from_api(api_key, keywords: list):
+    """
+    已加入「子報導挖掘 (Sub-stories)」功能
+    """
     raw_results = collections.defaultdict(list)
+    
     for kw in keywords:
-        params = {
-            "engine": "google_news", 
-            "q": kw, 
-            "api_key": api_key, 
-            "hl": "zh-tw", 
-            "gl": "tw", 
-            "num": 100, 
-            "tbs": "qdr:d"  # API 層面的 24H 限制
-        }
-        try:
-            search = GoogleSearch(params)
-            data = search.get_dict()
-            if "news_results" in data:
-                for item in data["news_results"]:
-                    title = item.get("title")
-                    link = item.get("link")
-                    date_str = item.get("date", "")
+        all_items = []
+        # 翻頁抓取
+        for start_index in [0, 10]: 
+            params = {
+                "engine": "google_news", 
+                "q": kw, 
+                "api_key": api_key, 
+                "hl": "zh-tw", 
+                "gl": "tw", 
+                "start": start_index, 
+                "tbs": "qdr:d" 
+            }
+            try:
+                search = GoogleSearch(params)
+                data = search.get_dict()
+                if "news_results" in data:
+                    news_list = data["news_results"]
+                    if not news_list: break
                     
-                    # ✅ 嚴格檢查：日期必須通過 strict_24h 驗證
-                    if title and link and is_strictly_24h(date_str):
-                        raw_results[kw].append(item)
-        except Exception as e:
-            st.error(f"搜尋關鍵字 '{kw}' 時發生錯誤: {e}")
+                    # === 挖掘隱藏的子報導 ===
+                    for main_item in news_list:
+                        # 1. 加入主新聞
+                        all_items.append(main_item)
+                        
+                        # 2. 檢查有沒有相關報導 (sub_articles / related_stories)
+                        # SerpApi 有時會把相關報導放在 'sub_articles' 或 'related_stories' 裡
+                        sub_articles = main_item.get("sub_articles", []) or main_item.get("related_stories", [])
+                        if sub_articles:
+                            for sub in sub_articles:
+                                # 子報導通常結構類似，直接加入
+                                all_items.append(sub)
+                    # ========================
+                else:
+                    break
+            except Exception as e:
+                st.error(f"搜尋錯誤: {e}")
+                break
+            
+        # 統一過濾與去重
+        seen_titles = set()
+        for item in all_items:
+            title = item.get("title")
+            link = item.get("link")
+            date_str = item.get("date", "")
+            
+            if title in seen_titles: continue
+            
+            if title and link and is_strictly_24h(date_str):
+                raw_results[kw].append(item)
+                seen_titles.add(title)
+                
     return raw_results
 
 @st.cache_data(ttl=86400)
@@ -150,8 +157,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測")
-    st.info("📢 **系統更新**：", icon="⏱️")
+    st.title("🚇 新北捷運輿情監測 (深度挖掘版)")
+    st.info("📢 **系統更新**：已加入「子報導挖掘」功能，嘗試展開被 Google 折疊的相關新聞。", icon="⛏️")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -171,7 +178,7 @@ with main_col:
     
     with st.expander("📖 使用說明"):
         st.markdown("""
-        1.  **抓取新聞**：僅保留「小時/分鐘前」或「今日」發布的新聞。
+        1.  **抓取新聞**：系統會自動挖掘主新聞底下的相關報導。
         2.  **AI 推薦**：AI 自動分析並勾選重要新聞。
         3.  **確認與匯出**：確認內容後產生 LINE 訊息。
         """)
@@ -189,7 +196,7 @@ with main_col:
         del st.session_state.fetch_success_message
 
     if fetch_button_pressed:
-        with st.spinner("正在抓取並進行 24H 極限過濾..."):
+        with st.spinner("正在深度挖掘並過濾..."):
             keyword_list = [k.strip() for k in keywords_input.split(",") if k.strip()]
             if not keyword_list:
                 st.warning("請輸入有效的關鍵字。")
@@ -197,7 +204,7 @@ with main_col:
                 all_news = fetch_news_from_api(SERPAPI_API_KEY, keyword_list)
                 st.session_state.filtered_news = all_news
                 total_found = sum(len(v) for v in all_news.values())
-                st.session_state.fetch_success_message = f"✅ 抓取完成！嚴格保留 {total_found} 則 24 小時內新聞。"
+                st.session_state.fetch_success_message = f"✅ 抓取完成！深度挖掘後共保留 {total_found} 則新聞。"
         st.rerun()
 
     if st.session_state.filtered_news:
@@ -315,8 +322,6 @@ with main_col:
                     button:hover {{ background-color: #e0e2e6; }}
                 </style>
             """, height=80)
-
-        
 
 
 
