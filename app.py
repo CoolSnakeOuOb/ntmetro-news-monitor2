@@ -42,55 +42,52 @@ def get_serpapi_account_info(api_key):
 
 def is_recent_news(date_str):
     """
-    ✅ 修正後的日期過濾器：
-    1. 接受相對時間 (小時/分鐘前)。
-    2. 接受「今天」與「昨天」的日期。
-    3. 嚴格剔除更早的日期 (如 12/21, 12/17)。
+    過濾器邏輯：
+    1. 接受相對時間 (ago, hour, min)
+    2. 接受「今天」與「昨天」的日期
+    3. 剔除更早的日期
     """
     if not date_str: return False
     s = date_str.lower()
     
-    # 1. 剔除明確的長天數 (天、週、月、年)
-    # 注意：這裡不剔除 "1 day ago" (昨天)，只剔除 "2 days", "3 days"
-    if any(k in s for k in ["2 days", "3 days", "4 days", "5 days", "week", "month", "year", "週", "月", "年"]):
+    # 1. 剔除長天數
+    if any(k in s for k in ["2 days", "3 days", "4 days", "week", "month", "year", "週", "月", "年"]):
         return False
 
     # 2. 接受相對時間
     allow_keywords = ["hour", "min", "sec", "just now", "ago", "前", "小時", "分", "秒", "時"]
     if any(k in s for k in allow_keywords): return True
 
-    # 3. 接受「今天」與「昨天」的絕對日期
+    # 3. 接受今昨兩天
     try:
         tw_tz = pytz.timezone('Asia/Taipei')
         now = datetime.now(tw_tz)
         yesterday = now - timedelta(days=1)
         
-        # 建立允許的日期字串清單 (包含今天與昨天)
         allowed_dates = []
         for d in [now, yesterday]:
             allowed_dates.extend([
-                d.strftime("%m/%d"),      # 12/23, 12/22
+                d.strftime("%m/%d"),      # 12/23
                 d.strftime("%Y/%m/%d"),   # 2025/12/23
-                d.strftime("%b %d")       # Dec 23, Dec 22
+                d.strftime("%b %d")       # Dec 23
             ])
             
-        # 檢查是否吻合
         for fmt in allowed_dates:
             if fmt in date_str: return True
             
-        return False # 既不是相對時間，也不是今昨兩天 -> 剔除
+        return False
     except:
         return False
 
 def fetch_news_from_api(api_key, keywords: list):
     """
-    包含「自動翻頁」與「子報導挖掘」功能
+    含自動翻頁與子報導挖掘
     """
     raw_results = collections.defaultdict(list)
     
     for kw in keywords:
         all_items = []
-        # 翻頁抓取 (抓前 2 頁，通常足夠覆蓋 48 小時)
+        # 翻頁抓取
         for start_index in [0, 10]: 
             params = {
                 "engine": "google_news", 
@@ -99,7 +96,7 @@ def fetch_news_from_api(api_key, keywords: list):
                 "hl": "zh-tw", 
                 "gl": "tw", 
                 "start": start_index, 
-                "tbs": "qdr:d" # 雖然 API 設了 24H，但我們用 Python 放寬一點點容許度給昨天
+                "tbs": "qdr:d" 
             }
             try:
                 search = GoogleSearch(params)
@@ -109,9 +106,7 @@ def fetch_news_from_api(api_key, keywords: list):
                     if not news_list: break
                     
                     for main_item in news_list:
-                        # 加入主新聞
                         all_items.append(main_item)
-                        # 挖掘子新聞 (如果有)
                         sub_articles = main_item.get("sub_articles", []) or main_item.get("related_stories", [])
                         if sub_articles:
                             all_items.extend(sub_articles)
@@ -121,7 +116,6 @@ def fetch_news_from_api(api_key, keywords: list):
                 st.error(f"搜尋錯誤: {e}")
                 break
             
-        # 統一過濾與去重
         seen_titles = set()
         for item in all_items:
             title = item.get("title")
@@ -130,7 +124,6 @@ def fetch_news_from_api(api_key, keywords: list):
             
             if title in seen_titles: continue
             
-            # ✅ 使用修正後的 is_recent_news 函式
             if title and link and is_recent_news(date_str):
                 raw_results[kw].append(item)
                 seen_titles.add(title)
@@ -172,8 +165,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測 (智能平衡版)")
-    st.info("📢 **系統更新**：已調整過濾邏輯，現在會顯示「今天」與「昨天」的新聞，同時排除更早的舊聞。", icon="✅")
+    st.title("🚇 新北捷運輿情監測 (精簡日期版)")
+    st.info("📢 **系統更新**：介面優化，已移除冗長的 UTC 時間標記。", icon="✨")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -193,7 +186,7 @@ with main_col:
     
     with st.expander("📖 使用說明"):
         st.markdown("""
-        1.  **抓取新聞**：系統會抓取並保留 48 小時內 (今、昨) 的新聞。
+        1.  **抓取新聞**：系統自動翻頁並保留今昨兩日新聞。
         2.  **AI 推薦**：AI 自動分析並勾選重要新聞。
         3.  **確認與匯出**：確認內容後產生 LINE 訊息。
         """)
@@ -219,7 +212,7 @@ with main_col:
                 all_news = fetch_news_from_api(SERPAPI_API_KEY, keyword_list)
                 st.session_state.filtered_news = all_news
                 total_found = sum(len(v) for v in all_news.values())
-                st.session_state.fetch_success_message = f"✅ 抓取完成！共保留 {total_found} 則新聞 (包含子報導)。"
+                st.session_state.fetch_success_message = f"✅ 抓取完成！共保留 {total_found} 則新聞。"
         st.rerun()
 
     if st.session_state.filtered_news:
@@ -261,8 +254,14 @@ with main_col:
                     for i, article in enumerate(items):
                         title = article.get('title', "無標題")
                         url = article.get('link', "#")
-                        date = article.get('date', '未知時間')
                         
+                        # --- ✅ 修改重點：日期清理 ---
+                        date = article.get('date', '未知時間')
+                        if isinstance(date, str):
+                            # 把 +0000 UTC 替換為空字串
+                            date = date.replace('+0000 UTC', '').replace('+0000', '').strip()
+                        # -------------------------
+
                         raw_source = article.get('source')
                         if isinstance(raw_source, dict):
                             source = raw_source.get('title') or raw_source.get('name') or "未知來源"
