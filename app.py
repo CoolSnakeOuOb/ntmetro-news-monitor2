@@ -165,8 +165,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測 (精簡日期版)")
-    st.info("📢 **系統更新**：介面優化，已移除冗長的 UTC 時間標記。", icon="✨")
+    st.title("🚇 新北捷運輿情監測")
+    st.info("📢 **系統更新**：早安你好。", icon="✨")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -204,7 +204,7 @@ with main_col:
         del st.session_state.fetch_success_message
 
     if fetch_button_pressed:
-        with st.spinner("正在抓取並過濾 (保留今昨兩天)..."):
+        with st.spinner("正在抓取並過濾"):
             keyword_list = [k.strip() for k in keywords_input.split(",") if k.strip()]
             if not keyword_list:
                 st.warning("請輸入有效的關鍵字。")
@@ -336,3 +336,4 @@ with main_col:
                     button:hover {{ background-color: #e0e2e6; }}
                 </style>
             """, height=80)
+
