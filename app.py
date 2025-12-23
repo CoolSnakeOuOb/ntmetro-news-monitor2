@@ -40,12 +40,23 @@ def get_serpapi_account_info(api_key):
 def fetch_news_from_light_api(api_key, keywords: list):
     raw_results = collections.defaultdict(list)
     for kw in keywords:
-        params = {"engine": "google_news_light", "q": kw, "api_key": api_key, "hl": "zh-tw", "gl": "tw", "num": 100, "tbs": "qdr:d"}
+        params = {
+            "engine": "google_news",  # 👈 修改點 1：從 google_news_light 改為 google_news
+            "q": kw, 
+            "api_key": api_key, 
+            "hl": "zh-tw", 
+            "gl": "tw", 
+            "num": 100, 
+            "tbs": "qdr:d" 
+        }
         try:
             search = GoogleSearch(params)
             data = search.get_dict()
             if "news_results" in data:
-                raw_results[kw] = data["news_results"]
+                for item in data["news_results"]:
+                    # 👈 修改點 2：完全移除日期檢查，只檢查是否有標題和連結
+                    if item.get("title") and item.get("link"):
+                        raw_results[kw].append(item)
         except Exception as e:
             st.error(f"搜尋關鍵字 '{kw}' 時發生錯誤: {e}")
     return raw_results
@@ -256,6 +267,7 @@ with main_col:
         
 
         
+
 
 
 
