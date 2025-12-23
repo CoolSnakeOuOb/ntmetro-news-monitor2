@@ -5,9 +5,8 @@ from serpapi import GoogleSearch
 import streamlit.components.v1 as components
 import requests
 import google.generativeai as genai
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
-import time
 
 # --- 1. 常數設定與金鑰讀取 ---
 st.set_page_config(page_title="捷運輿情監測", page_icon="🚇", layout="wide")
@@ -41,36 +40,57 @@ def get_serpapi_account_info(api_key):
     except requests.RequestException:
         return None
 
-def is_strictly_24h(date_str):
+def is_recent_news(date_str):
     """
-    🔥 極限嚴格 24 小時過濾器 🔥
+    ✅ 修正後的日期過濾器：
+    1. 接受相對時間 (小時/分鐘前)。
+    2. 接受「今天」與「昨天」的日期。
+    3. 嚴格剔除更早的日期 (如 12/21, 12/17)。
     """
     if not date_str: return False
     s = date_str.lower()
-    block_keywords = ["day", "week", "month", "year", "天", "週", "月", "年"]
-    if any(k in s for k in block_keywords): return False
-    allow_keywords = ["hour", "min", "sec", "just now", "小時", "分", "秒", "時"]
+    
+    # 1. 剔除明確的長天數 (天、週、月、年)
+    # 注意：這裡不剔除 "1 day ago" (昨天)，只剔除 "2 days", "3 days"
+    if any(k in s for k in ["2 days", "3 days", "4 days", "5 days", "week", "month", "year", "週", "月", "年"]):
+        return False
+
+    # 2. 接受相對時間
+    allow_keywords = ["hour", "min", "sec", "just now", "ago", "前", "小時", "分", "秒", "時"]
     if any(k in s for k in allow_keywords): return True
+
+    # 3. 接受「今天」與「昨天」的絕對日期
     try:
         tw_tz = pytz.timezone('Asia/Taipei')
         now = datetime.now(tw_tz)
-        # 只允許今天的日期
-        today_formats = [now.strftime("%m/%d"), now.strftime("%Y/%m/%d"), now.strftime("%b %d")]
-        for fmt in today_formats:
+        yesterday = now - timedelta(days=1)
+        
+        # 建立允許的日期字串清單 (包含今天與昨天)
+        allowed_dates = []
+        for d in [now, yesterday]:
+            allowed_dates.extend([
+                d.strftime("%m/%d"),      # 12/23, 12/22
+                d.strftime("%Y/%m/%d"),   # 2025/12/23
+                d.strftime("%b %d")       # Dec 23, Dec 22
+            ])
+            
+        # 檢查是否吻合
+        for fmt in allowed_dates:
             if fmt in date_str: return True
-        return False
+            
+        return False # 既不是相對時間，也不是今昨兩天 -> 剔除
     except:
         return False
 
 def fetch_news_from_api(api_key, keywords: list):
     """
-    已加入「子報導挖掘 (Sub-stories)」功能
+    包含「自動翻頁」與「子報導挖掘」功能
     """
     raw_results = collections.defaultdict(list)
     
     for kw in keywords:
         all_items = []
-        # 翻頁抓取
+        # 翻頁抓取 (抓前 2 頁，通常足夠覆蓋 48 小時)
         for start_index in [0, 10]: 
             params = {
                 "engine": "google_news", 
@@ -79,7 +99,7 @@ def fetch_news_from_api(api_key, keywords: list):
                 "hl": "zh-tw", 
                 "gl": "tw", 
                 "start": start_index, 
-                "tbs": "qdr:d" 
+                "tbs": "qdr:d" # 雖然 API 設了 24H，但我們用 Python 放寬一點點容許度給昨天
             }
             try:
                 search = GoogleSearch(params)
@@ -88,19 +108,13 @@ def fetch_news_from_api(api_key, keywords: list):
                     news_list = data["news_results"]
                     if not news_list: break
                     
-                    # === 挖掘隱藏的子報導 ===
                     for main_item in news_list:
-                        # 1. 加入主新聞
+                        # 加入主新聞
                         all_items.append(main_item)
-                        
-                        # 2. 檢查有沒有相關報導 (sub_articles / related_stories)
-                        # SerpApi 有時會把相關報導放在 'sub_articles' 或 'related_stories' 裡
+                        # 挖掘子新聞 (如果有)
                         sub_articles = main_item.get("sub_articles", []) or main_item.get("related_stories", [])
                         if sub_articles:
-                            for sub in sub_articles:
-                                # 子報導通常結構類似，直接加入
-                                all_items.append(sub)
-                    # ========================
+                            all_items.extend(sub_articles)
                 else:
                     break
             except Exception as e:
@@ -116,7 +130,8 @@ def fetch_news_from_api(api_key, keywords: list):
             
             if title in seen_titles: continue
             
-            if title and link and is_strictly_24h(date_str):
+            # ✅ 使用修正後的 is_recent_news 函式
+            if title and link and is_recent_news(date_str):
                 raw_results[kw].append(item)
                 seen_titles.add(title)
                 
@@ -157,8 +172,8 @@ def get_ai_recommendations(_articles_dict, prompt_template):
 left_margin, main_col, right_margin = st.columns([0.15, 0.7, 0.15])
 
 with main_col:
-    st.title("🚇 新北捷運輿情監測 (深度挖掘版)")
-    st.info("📢 **系統更新**：已加入「子報導挖掘」功能，嘗試展開被 Google 折疊的相關新聞。", icon="⛏️")
+    st.title("🚇 新北捷運輿情監測 (智能平衡版)")
+    st.info("📢 **系統更新**：已調整過濾邏輯，現在會顯示「今天」與「昨天」的新聞，同時排除更早的舊聞。", icon="✅")
 
     if not SERPAPI_KEYS_TABLE:
         st.error("錯誤：請在 .streamlit/secrets.toml 中設定 [serpapi_keys] 表格")
@@ -178,7 +193,7 @@ with main_col:
     
     with st.expander("📖 使用說明"):
         st.markdown("""
-        1.  **抓取新聞**：系統會自動挖掘主新聞底下的相關報導。
+        1.  **抓取新聞**：系統會抓取並保留 48 小時內 (今、昨) 的新聞。
         2.  **AI 推薦**：AI 自動分析並勾選重要新聞。
         3.  **確認與匯出**：確認內容後產生 LINE 訊息。
         """)
@@ -196,7 +211,7 @@ with main_col:
         del st.session_state.fetch_success_message
 
     if fetch_button_pressed:
-        with st.spinner("正在深度挖掘並過濾..."):
+        with st.spinner("正在抓取並過濾 (保留今昨兩天)..."):
             keyword_list = [k.strip() for k in keywords_input.split(",") if k.strip()]
             if not keyword_list:
                 st.warning("請輸入有效的關鍵字。")
@@ -204,7 +219,7 @@ with main_col:
                 all_news = fetch_news_from_api(SERPAPI_API_KEY, keyword_list)
                 st.session_state.filtered_news = all_news
                 total_found = sum(len(v) for v in all_news.values())
-                st.session_state.fetch_success_message = f"✅ 抓取完成！深度挖掘後共保留 {total_found} 則新聞。"
+                st.session_state.fetch_success_message = f"✅ 抓取完成！共保留 {total_found} 則新聞 (包含子報導)。"
         st.rerun()
 
     if st.session_state.filtered_news:
@@ -322,13 +337,3 @@ with main_col:
                     button:hover {{ background-color: #e0e2e6; }}
                 </style>
             """, height=80)
-
-
-
-
-
-
-
-
-
-
